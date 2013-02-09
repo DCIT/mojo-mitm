@@ -1,0 +1,11 @@
+#!perl
+
+use 5.010;
+use strict;
+use warnings;
+use Mojo::MITM;
+
+my $app = Mojo::MITM->new();
+$app->parse_options(@ARGV);
+$app->do_job() or exit 1;
+
