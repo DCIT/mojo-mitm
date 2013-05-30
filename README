@@ -52,7 +52,7 @@ Usage:
     -log=<log_file>
         redirect logs to given logfile
 
-Version: 0.005
+Version: 0.006
 
 Copyright (c) 2013 DCIT, a.s. [http://www.dcit.cz] / Karel Miko
 
