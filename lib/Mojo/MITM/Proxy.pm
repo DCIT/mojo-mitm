@@ -123,7 +123,7 @@ sub _new_connection {
   $stream->timeout($self->inactivity_timeout);
 
   # Events
-  $stream->on(read    => sub { $self->_read($id, pop) });
+  $stream->on(read    => sub { $self->_read($id => pop) });
   $stream->on(timeout => sub { $self->log->error("stream[$id]: Inactivity timeout") if $c->{tx} });
   $stream->on(close   => sub { $self->_close($id) });
   $stream->on(error   => sub {
@@ -431,7 +431,7 @@ sub start {
 sub stop {
   my $self = shift;
 
-  # Pause accepting connections
+  # Suspend accepting connections but keep listen sockets open
   my $loop = $self->ioloop;
   while (my $id = shift @{$self->{acceptors}}) {
     my $server = $self->{servers}{$id} = $loop->acceptor($id);
@@ -445,16 +445,11 @@ sub stop {
 sub _build_tx {
   my ($self, $id, $c) = @_;
 
-  # Build transaction
   my $tx = Mojo::Transaction::HTTP->new()->connection($id);
 
-
-  # Store connection information
   my $handle = $self->ioloop->stream($id)->handle;
   $tx->local_address($handle->sockhost)->local_port($handle->sockport);
   $tx->remote_address($handle->peerhost)->remote_port($handle->peerport);
-
-  # TLS
   $tx->req->url->base->scheme('https') if $c->{tls};
 
   # Handle upgrades and requests
@@ -476,9 +471,7 @@ sub _build_tx {
   );
 
   # Kept alive if we have more than one request on the connection
-  $tx->kept_alive(1) if ++$c->{requests} > 1;
-
-  return $tx;
+  return ++$c->{requests} > 1 ? $tx->kept_alive(1) : $tx;
 }
 
 sub _close {
@@ -487,7 +480,6 @@ sub _close {
   # Finish gracefully
   if (my $tx = $self->{connections}{$id}{tx}) { $tx->server_close }
 
-  # Remove connection
   delete $self->{connections}{$id};
 }
 
@@ -522,9 +514,9 @@ sub _finish {
   return $self->_remove($id) if $req->error || !$tx->keep_alive;
 
   # Build new transaction for leftovers
-  return unless $req->has_leftovers;
+  return unless length(my $leftovers = $req->content->leftovers);
   $tx = $c->{tx} = $self->_build_tx($id, $c);
-  $tx->server_read($req->leftovers);
+  $tx->server_read($leftovers);
 }
 
 sub _ctx_sni_callback {
@@ -544,7 +536,6 @@ sub _ctx_sni_callback {
 sub _listen {
   my ($self, $listen) = @_;
 
-  # Options
   my $url     = Mojo::URL->new($listen);
   my $query   = $url->query;
   my $options = {
@@ -553,7 +544,7 @@ sub _listen {
     port     => $url->port,
     tls_ca   => scalar $query->param('ca'),
     tls_cert => scalar $query->param('cert'),
-    tls_key  => scalar $query->param('key'),
+    tls_key  => scalar $query->param('key')
   };
   if ($url->protocol eq 'https') {
     if (!$options->{tls_cert} || !$options->{tls_key}) {
@@ -569,7 +560,6 @@ sub _listen {
   delete $options->{address} if $options->{address} eq '*';
   my $tls = $options->{tls} = $url->protocol eq 'https' ? 1 : undef;
 
-  # Listen
   weaken $self;
   my $id = $self->ioloop->server(
     $options => sub {
@@ -588,15 +578,13 @@ sub _listen {
 sub _read {
   my ($self, $id, $chunk) = @_;
 
-  # Make sure we have a transaction
-  my $c = $self->{connections}{$id};
+  # Make sure we have a transaction and parse chunk
+  return unless my $c = $self->{connections}{$id};
   my $tx = $c->{tx} ||= $self->_build_tx($id, $c);
-
-  # Parse chunk
   warn "-- Server <<< Client (@{[$tx->req->url->to_abs]})\n$chunk\n" if DEBUG;
   $tx->server_read($chunk);
 
-  # Last keep alive request or corrupted connection
+  # Last keep-alive request or corrupted connection
   $tx->res->headers->connection('close')
     if (($c->{requests} || 0) >= $self->max_requests) || $tx->req->error;
 
@@ -615,17 +603,15 @@ sub _write {
   my ($self, $id) = @_;
 
   # Not writing
-  my $c = $self->{connections}{$id};
+  return unless my $c  = $self->{connections}{$id};
   return unless my $tx = $c->{tx};
   return unless $tx->is_writing;
 
-  # Get chunk
+  # Get chunk and write
   return if $c->{writing}++;
   my $chunk = $tx->server_write;
   delete $c->{writing};
   warn "-- Server >>> Client (@{[$tx->req->url->to_abs]})\n$chunk\n" if DEBUG;
-
-  # Write chunk
   my $stream = $self->ioloop->stream($id)->write($chunk);
 
   # Finish or continue writing
@@ -640,7 +626,7 @@ sub _write {
       return unless $c->{tx};
     }
   }
-  $stream->write('', $cb);
+  $stream->write('' => $cb);
 }
 
 1;

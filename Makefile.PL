@@ -14,7 +14,7 @@ WriteMakefile(
       'Net::SSLeay'      => 1.50,
       'IO::Socket::SSL'  => 1.75,
       'IO::Socket::IP'   => 0.16,
-      'Mojolicious'      => 3.30,
+      'Mojolicious'      => 4.0,
       'Getopt::Long'     => 2.13,
       'Test::More'       => 0,
       'Time::Piece'      => 0,

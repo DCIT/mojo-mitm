@@ -5,7 +5,7 @@ use Mojo::Base -base;
 use Getopt::Long 2.13     qw(GetOptionsFromArray);
 use Mojo::MITM::Proxy;
 
-our $VERSION = "0.005";
+our $VERSION = "0.006";
 $VERSION = eval $VERSION;
 
 has mitm_args => undef;
